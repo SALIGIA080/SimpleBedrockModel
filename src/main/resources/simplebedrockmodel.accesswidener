@@ -1,0 +1,5 @@
+accessWidener v2 official
+
+# 26.2 迁移：原 1.20.1 的 named(yarn) 命名改为 official(Mojmap) 命名。
+# 以下条目需逐个对照 26.2 反编译 jar 重新核实；失效条目会在编译时报错并修正。
+accessible field net/minecraft/server/packs/resources/ReloadableResourceManager listeners Ljava/util/List;
