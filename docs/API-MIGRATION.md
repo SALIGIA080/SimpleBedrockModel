@@ -6,6 +6,21 @@
 
 ---
 
+## 〇、与上游版本的关系（同步说明）
+
+本移植追踪上游 NeoForge 官方 **2.6.2**（版本号 `2.6.2+mc26.2`）。上游 2.6.2 相对 2.6.1 的改动，在 26.2 下的处理如实说明：
+
+| 上游 2.6.2 改动 | 内容 | 26.2 处理 |
+|---|---|---|
+| `MeshIntegerAttributes.LightState` | 世界网格**运行时替换 UV2 实例光照**（`glVertexAttribDivisor` + 参数 buffer） | ⚠️ **等价降级**：26.2 `RenderPipeline.withVertexBinding` 静态声明、`VertexBuffer` 类已移除（改为 `GpuBuffer`），无运行时改 UV2 属性来源钩子。以「CPU 顶点副本补丁 + `CommandEncoder.writeToBuffer` 整段回写」实现等价实例光照（语义等价，非 1:1，精确逐实例读取能力损失） |
+| `StaticMeshCache` / `MeshIntegerAttributes` 删除 `glGetError` 检查 | 规避 AMD 驱动 `glGetError` 原生访问违规 | ✅ 天然适用：26.2 重写后走 `GpuBuffer` 同步上传，本无 `glGetError` 调用点 |
+| `accesstransformer.cfg` 新增 `VertexBuffer.vertexBufferId`/`arrayObjectId` | NeoForge AT 暴露字段 | ❌ 不适用：26.2 无 `VertexBuffer`；Fabric 用 accesswidener |
+
+> 结论：上游 2.6.2 的实质改动只有「运行时实例光照」一项，它在 26.2 架构下无法 1:1 移植，
+> 本移植以「CPU 补丁 + 整段回写」等价降级覆盖（见 §五 有界差异）。其余改动在 26.2 下天然满足或不存在。
+
+---
+
 ## 一、纯改名 / 改包（机械替换）
 
 | 旧（1.20.1） | 新（26.2） | 说明 |
@@ -57,7 +72,7 @@
 
 | 功能 | 上游做法（1.20.1） | 26.2 移植做法 | 差异原因 |
 |---|---|---|---|
-| v2 实例光照 | `MeshIntegerAttributes` 运行时改 UV2 属性来源（`glVertexAttribIPointer` divisor） | 实例光照烘焙进顶点 / 固定光照 | `RenderPipeline.withVertexBinding` 静态声明，无运行时改 UV2 来源钩子 |
+| v2 实例光照 | `MeshIntegerAttributes` 运行时改 UV2 属性来源（`glVertexAttribIPointer` divisor） | CPU 顶点副本补丁 + `CommandEncoder.writeToBuffer` 整段回写 | `RenderPipeline.withVertexBinding` 静态声明，`VertexBuffer` 已移除（改 `GpuBuffer`），无运行时改 UV2 来源钩子 |
 | 屏幕渲染事件 | Forge `ScreenEvent` 逐帧回调 | Fabric「屏幕打开即活跃」保守等价 | Fabric 无 ScreenEvent 等价物 |
 | 纹理复制（blit） | 逐像素 `copyTextureToTexture` | `RenderTarget.blitAndBlendToTexture(...)` | 26.2 blit 本质为全屏三角形，非逐像素等价 |
 

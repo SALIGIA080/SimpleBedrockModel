@@ -3,8 +3,8 @@ package com.github.mcmodderanchor.simplebedrockmodel.v1.particle.world;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.data.AtlasIds;
 import net.minecraft.resources.Identifier;
 
 /**
@@ -23,15 +23,21 @@ public final class ParticleTextureBridge {
     /**
      * 把 SBM 纹理 Identifier 转为粒子 atlas sprite 名称。
      * <p>
-     * {@code minecraft:textures/particle/generic_0.png} → {@code minecraft:generic_0}
+     * 26.2 粒子 atlas 的 directory source 是 {@code {type:"directory", prefix:"", source:"particle"}}，
+     * 它扫描 {@code textures/particle/} 目录，注册的 sprite 名【保留 particle/ 前缀】：
+     * {@code namespace:textures/particle/flash_strip.png} → sprite id {@code namespace:particle/flash_strip}
+     * （DirectoryLister 字节码：fileToId → withPrefix(idPrefix="")，仅去掉 textures/ 前缀与 .png 后缀）。
+     * <p>
+     * 因此这里【只去 textures/ 前缀和 .png 后缀，保留 particle/ 前缀】。
+     * 此前误多删一层 particle/ 前缀 → atlas.getSprite 查不到 → 返回 missing sprite →
+     * 烟雾/火焰世界粒子 UV 错乱，表现为「放射状青色细长条 + 火光垂直竖立」。
+     * <p>
+     * {@code minecraft:textures/particle/generic_0.png} → {@code minecraft:particle/generic_0}
      */
     public static Identifier toSpriteId(Identifier texture) {
         String path = texture.getPath();
         if (path.startsWith("textures/")) {
             path = path.substring("textures/".length());
-        }
-        if (path.startsWith("particle/")) {
-            path = path.substring("particle/".length());
         }
         if (path.endsWith(".png")) {
             path = path.substring(0, path.length() - ".png".length());
@@ -41,16 +47,22 @@ public final class ParticleTextureBridge {
 
     /**
      * 从粒子 atlas 获取 sprite；未注册的纹理降级到 missing sprite。
+     * <p>
+     * 【崩溃修复 · 2026-11-06】26.2 的 {@code AtlasManager.getAtlasOrThrow} 用
+     * {@code atlasById} 查找，key 是「atlas id」（{@code AtlasIds.PARTICLES} =
+     * {@code minecraft:particles}），不是「sheet id」（{@code TextureAtlas.LOCATION_PARTICLES} =
+     * {@code minecraft:textures/atlas/particles.png}）。此前误传 sheet id 导致
+     * {@code Invalid atlas id} 崩溃（修复 basePose 后烟雾世界粒子首次走到本路径时触发）。
      */
     public static TextureAtlasSprite getSprite(Identifier texture) {
         try {
             var atlas = Minecraft.getInstance().getAtlasManager()
-                    .getAtlasOrThrow(TextureAtlas.LOCATION_PARTICLES);
-            return atlas.getSprite(toSpriteId(texture));
+                    .getAtlasOrThrow(AtlasIds.PARTICLES);
+            Identifier spriteId = toSpriteId(texture);
+            return atlas.getSprite(spriteId);
         } catch (Exception e) {
-            // 兜底：atlas 不可用时返回 missing sprite
             var atlas = Minecraft.getInstance().getAtlasManager()
-                    .getAtlasOrThrow(TextureAtlas.LOCATION_PARTICLES);
+                    .getAtlasOrThrow(AtlasIds.PARTICLES);
             return atlas.missingSprite();
         }
     }

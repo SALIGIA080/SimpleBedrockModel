@@ -1,20 +1,17 @@
 package com.github.mcmodderanchor.simplebedrockmodel.v1.particle.render;
 
-import com.github.mcmodderanchor.simplebedrockmodel.v1.client.compat.acceleratedrendering.AcceleratedRenderingCompat;
 import com.github.mcmodderanchor.simplebedrockmodel.v1.particle.data.ParticleDescription;
 import com.github.mcmodderanchor.simplebedrockmodel.v1.particle.data.component.ParticleAppearanceBillboard;
 import com.github.mcmodderanchor.simplebedrockmodel.v1.particle.data.component.ParticleAppearanceLighting;
 import com.github.mcmodderanchor.simplebedrockmodel.v1.particle.runtime.ParticleEmitterInstance;
 import com.github.mcmodderanchor.simplebedrockmodel.v1.particle.runtime.ParticleInstance;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.resources.Identifier;
-import org.joml.Matrix3f;
 import org.joml.Matrix4f;
 
 import org.jetbrains.annotations.Nullable;
@@ -70,18 +67,15 @@ public final class ParticleRenderer {
         int particleLight = hasLighting ? light : 15728880;
 
         // 26.2：SubmitNodeCollector 无 getBuffer，几何经 submitCustomGeometry 提交（同步回调）。
-        bufferSource.submitCustomGeometry(poseStack, renderType, (entryPose, consumer) -> {
-            Matrix4f pose = entryPose.pose();
-            Matrix3f normal = entryPose.normal();
+        // 【火焰「粘连」修复】BillboardHelper 已把顶点变换到「世界轴空间」（poseStack 的
+        // pose 作用后的最终空间，含 viewRotationMatrix.invert()），并用手动变换后的坐标写顶点。
+        // 若这里仍传非 identity 的 poseStack，collector 会用 entryPose（= poseStack 的 pose）
+        // 把这些「已在世界轴空间」的顶点再变换一次 → 双重变换 → 火焰 billboard 位置/朝向错乱
+        // （表现为「粘连」）。对齐 BedrockModel.submit 的做法：顶点已含完整 pose，用 identity
+        // stack 提交，避免 entryPose 二次变换。
+        PoseStack identityStack = new PoseStack();
+        bufferSource.submitCustomGeometry(identityStack, renderType, (entryPose, consumer) -> {
             for (ParticleInstance particle : particles) {
-                Matrix4f effectivePose = (localPos && !particle.fpDetached)
-                        ? new Matrix4f(pose).mul(emitterTransform)
-                        : pose;
-                // 加速渲染：粒子以局部坐标 + beginTransform 提交成 mesh，才与枪体同加速层被模板剔除
-                if (AcceleratedRenderingCompat.isLoaded()
-                        && AcceleratedRenderingCompat.renderParticleBillboard(consumer, particle, effectivePose, normal, particleLight)) {
-                    continue;
-                }
                 BillboardHelper.renderBillboard(particle, poseStack, consumer, particleLight, mode,
                         emitterTransform, localPos, localRot, cameraPitch, cameraRoll, cameraRotation);
             }

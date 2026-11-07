@@ -442,24 +442,45 @@ public class SnowStormParticle extends SingleQuadParticle {
         return ParticleRenderType.SINGLE_QUADS;
     }
 
+    // 【贴图错乱修复 · 2026-11-07】26.2 粒子渲染强制走 atlas：SingleQuadParticle 的
+    // extractRotatedQuad → QuadParticleRenderState.renderRotatedQuad 直接把 getU0~getV1 的
+    // 返回值当【atlas 内 UV】写入顶点（字节码级确认：renderVertex 里 setUv(fload9, fload10)
+    // 原样透传，不做任何 atlas 重映射）。而 particleData.u0~v1 是 ParticleAppearanceBillboard
+    // 算出的【贴图内 0~1 归一化 UV】（u / textureWidth）。两者语义不同：直接返回贴图内 0~1，
+    // 采样到的是整张 atlas 大图（含其它 sprite 区域）→ 青色细长条 + 火光垂直竖立。
+    //
+    // 正确做法：把贴图内 0~1 归一化 UV 线性映射到 atlas 内当前 sprite 的 UV 区间
+    // [sprite.getU0(), sprite.getU1()] × [sprite.getV0(), sprite.getV1()]。
+    // 贴图内坐标 t ∈ [0,1] → atlas 内 u = spriteU0 + t * (spriteU1 - spriteU0)。
+    // 这样每个粒子的动画帧（flipbook 的 u 滚动）仍正确落在 atlas 中 smoke_strip 这一小块区域。
     @Override
     protected float getU0() {
-        return particleData.u0;
+        return atlasU(particleData.u0);
     }
 
     @Override
     protected float getU1() {
-        return particleData.u1;
+        return atlasU(particleData.u1);
     }
 
     @Override
     protected float getV0() {
-        return particleData.v0;
+        return atlasV(particleData.v0);
     }
 
     @Override
     protected float getV1() {
-        return particleData.v1;
+        return atlasV(particleData.v1);
+    }
+
+    /** 贴图内归一化 u（0~1）→ atlas 内 sprite 的 u 坐标。 */
+    private float atlasU(float texU) {
+        return this.sprite.getU0() + texU * (this.sprite.getU1() - this.sprite.getU0());
+    }
+
+    /** 贴图内归一化 v（0~1）→ atlas 内 sprite 的 v 坐标。 */
+    private float atlasV(float texV) {
+        return this.sprite.getV0() + texV * (this.sprite.getV1() - this.sprite.getV0());
     }
 
     /**

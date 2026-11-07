@@ -35,6 +35,16 @@ structure follows [Sh1roCu's Fabric port](https://github.com/Sh1roCu/SimpleBedro
   **动画混合** —— 支持混合空间、分层与运动学插值混合
 - ✅ **Resource Pack Support** — load models and animations from resource packs
   **资源包支持** —— 可从资源包加载模型与动画
+- ✅ **Particle Rendering (billboard / snowstorm)** — first-person muzzle-flash & smoke
+  particles are correctly camera-facing and atlas-mapped on 26.2
+  **粒子渲染（billboard / snowstorm）** —— 第一人称枪口火焰与烟雾粒子在 26.2 上正确面向相机、正确映射 atlas
+
+> **枪口粒子修复（2026-11-06 ~ 11-07）**：修复第一人称枪口火焰「垂直竖立 / 粘连」与烟雾「错位 / 青色条」。
+> 根因有三处，均已对齐 26.2 真实渲染语义：
+> 1. `BillboardHelper` 的 billboard 轴改用摄像机 `getViewRotationMatrix()` 的**列向量**（火焰恒横向面向相机）；
+> 2. `SnowStormParticle` 的贴图内 0~1 UV 线性映射到 atlas 内当前 sprite 区间（烟雾不再采到整张 atlas 大图）；
+> 3. `ParticleTextureBridge` 的 atlas id 改用 `AtlasIds.PARTICLES`、sprite 名保留 `particle/` 前缀（不再 missing sprite / 崩溃）。
+> 详见 [docs/API-MIGRATION.md](docs/API-MIGRATION.md)。
 
 ## Quick Start / 快速开始
 

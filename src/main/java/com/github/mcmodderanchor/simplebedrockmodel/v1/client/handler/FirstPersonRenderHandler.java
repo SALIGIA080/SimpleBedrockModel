@@ -467,14 +467,19 @@ public class FirstPersonRenderHandler {
     }
 
     /**
-     * 用摄像机的 pitch/yaw/roll 构建视图旋转矩阵（与 Minecraft 内部一致）。
-     * Minecraft 的视图矩阵构建顺序：先绕 X 旋转 pitch，再绕 Y 旋转 (yaw + 180)，最后绕 Z 旋转 roll。
+     * 构建摄像机视图旋转矩阵 R（世界 → 视图）。
+     * <p>
+     * 【火焰「粘连」根因 · 2026-11-06】此前用手工欧拉重建
+     * {@code rotationX(xRot)·rotationY(yRot+180)·rotationZ(roll)}，与 26.2 真实的
+     * viewRotationMatrix 不一致：26.2 {@code Camera.setRotation} 是
+     * {@code rotationYXZ(π - yRot°, -xRot°, 0)}（roll 恒为 0，且先 Y 后 X），
+     * {@code getViewRotationMatrix} = {@code rotation(rotation.conjugate())}。
+     * 欧拉顺序、符号、roll 三处皆错 → 当玩家 roll≠0 或转头时 cameraRotation ≠ R，
+     * ROTATE_XYZ 的 billboard 轴方向算错 → 火焰不面向相机 → 「粘连」。
+     * 直接改用 26.2 权威的 {@link Camera#getViewRotationMatrix(Matrix4f)}。
      */
     private static Matrix4f buildCameraRotation(Camera camera, float rollRadians) {
-        return new Matrix4f()
-                .rotationX((float) Math.toRadians(camera.xRot()))
-                .rotateY((float) Math.toRadians(camera.yRot() + 180f))
-                .rotateZ(rollRadians);
+        return camera.getViewRotationMatrix(new Matrix4f());
     }
 
     public static boolean shouldLockVanilla() {

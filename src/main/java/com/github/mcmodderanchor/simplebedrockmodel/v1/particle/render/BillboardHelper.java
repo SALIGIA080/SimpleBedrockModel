@@ -9,7 +9,6 @@ import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import org.jetbrains.annotations.Nullable;
-import org.joml.Matrix3f;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
@@ -26,8 +25,6 @@ public final class BillboardHelper {
     private static final Vector3f TEMP_AXIS_X = new Vector3f();
     private static final Vector3f TEMP_AXIS_Y = new Vector3f();
     private static final Vector3f TEMP_DIR = new Vector3f();
-    private static final Matrix4f IDENTITY_POSE = new Matrix4f();
-    private static final Matrix3f IDENTITY_NORMAL = new Matrix3f();
 
     private BillboardHelper() {}
 
@@ -77,12 +74,12 @@ public final class BillboardHelper {
             velPose = pose;
         }
 
-        // 计算 billboard 的两个轴向量（视图空间中）
+        // 计算 billboard 的两个轴向量（由 applyBillboardAxes 按朝向模式填充）。
         Vector3f axisX = TEMP_AXIS_X.set(1, 0, 0);
         Vector3f axisY = TEMP_AXIS_Y.set(0, 1, 0);
-        applyBillboardAxes(axisX, axisY, mode, velX, velY, velZ, velPose, pose, cameraPitch, cameraRoll);
+        applyBillboardAxes(axisX, axisY, mode, velX, velY, velZ, velPose, pose, cameraPitch, cameraRoll, cameraRotation);
 
-        // 应用粒子自旋旋转
+        // 应用粒子自旋旋转（绕「屏幕法线」）。
         if (particle.rotation != 0) {
             float rad = (float) Math.toRadians(particle.rotation);
             float cos = (float) Math.cos(rad);
@@ -93,32 +90,34 @@ public final class BillboardHelper {
             axisY.set(-ax * sin + bx * cos, -ay * sin + by * cos, -az * sin + bz * cos);
         }
 
-        // 直接在视图空间中构建 4 个顶点
+        // 顶点即最终坐标：调用方 ParticleRenderer 用 identity stack 提交，collector 只用
+        // modelView 把这里的世界轴空间坐标变换到屏幕，故这里用无矩阵的 addVertex(x,y,z)。
         float cx = TEMP_VIEW_POS.x, cy = TEMP_VIEW_POS.y, cz = TEMP_VIEW_POS.z;
 
-        // 使用 identity pose，顶点已经在视图空间中
-        IDENTITY_POSE.identity();
-        IDENTITY_NORMAL.identity();
-
-        vertex(consumer, IDENTITY_POSE, IDENTITY_NORMAL,
+        // 【回退 · 2026-11-07】energy_swirl 管线启用了 APPLY_TEXTURE_MATRIX shader define，
+        // shader 内部会自动用 sprite 的 texture matrix 把「sprite 局部 UV」映射到 atlas 坐标。
+        // 因此顶点 UV 必须传【原始贴图内 0~1 归一化坐标】（particle.u0~v1 原样），
+        // 由 shader 的 texture matrix 统一做 sprite→atlas 变换。
+        // 此前手动在 CPU 侧做 atlas 映射 → 与 shader 的 texture matrix 双重映射 → UV 错乱成色块。
+        vertex(consumer,
                 cx - axisX.x * hw - axisY.x * hh, cy - axisX.y * hw - axisY.y * hh, cz - axisX.z * hw - axisY.z * hh,
                 particle.u0, particle.v1, particle, light);
-        vertex(consumer, IDENTITY_POSE, IDENTITY_NORMAL,
+        vertex(consumer,
                 cx - axisX.x * hw + axisY.x * hh, cy - axisX.y * hw + axisY.y * hh, cz - axisX.z * hw + axisY.z * hh,
                 particle.u0, particle.v0, particle, light);
-        vertex(consumer, IDENTITY_POSE, IDENTITY_NORMAL,
+        vertex(consumer,
                 cx + axisX.x * hw + axisY.x * hh, cy + axisX.y * hw + axisY.y * hh, cz + axisX.z * hw + axisY.z * hh,
                 particle.u1, particle.v0, particle, light);
-        vertex(consumer, IDENTITY_POSE, IDENTITY_NORMAL,
+        vertex(consumer,
                 cx + axisX.x * hw - axisY.x * hh, cy + axisX.y * hw - axisY.y * hh, cz + axisX.z * hw - axisY.z * hh,
                 particle.u1, particle.v1, particle, light);
     }
 
-    private static void vertex(VertexConsumer consumer, Matrix4f pose, Matrix3f normal,
+    private static void vertex(VertexConsumer consumer,
                                 float x, float y, float z,
                                 float u, float v,
                                 ParticleInstance particle, int light) {
-        consumer.addVertex(pose, x, y, z)
+        consumer.addVertex(x, y, z)
                 .setColor(particle.r, particle.g, particle.b, particle.a)
                 .setUv(u, v)
                 .setOverlay(OverlayTexture.NO_OVERLAY)
@@ -141,11 +140,21 @@ public final class BillboardHelper {
                                             ParticleAppearanceBillboard.FaceCameraMode mode,
                                             float velX, float velY, float velZ,
                                             Matrix4f velPose, Matrix4f viewPose,
-                                            float cameraPitch, float cameraRoll) {
+                                            float cameraPitch, float cameraRoll,
+                                            @Nullable Matrix4f cameraRotation) {
         switch (mode) {
             case ROTATE_XYZ, LOOKAT_XYZ -> {
-                axisX.set(1, 0, 0);
-                axisY.set(0, 1, 0);
+                // 26.2 手部 pass：pose（顶点矩阵）= camRot 的转置，mv（modelView）= camRot，
+                // camRot（= camera.getViewRotationMatrix()）是正交矩阵。
+                // 最终屏幕 = mv·(pose·p + axis·hw) = p + camRot·axis·hw。
+                // 要让火焰恒横向（camRot·axisX == 屏幕水平 (1,0,0)），axis 取 camRot 的【列向量】。
+                if (cameraRotation != null) {
+                    axisX.set(cameraRotation.m00(), cameraRotation.m10(), cameraRotation.m20());
+                    axisY.set(cameraRotation.m01(), cameraRotation.m11(), cameraRotation.m21());
+                } else {
+                    axisX.set(1, 0, 0);
+                    axisY.set(0, 1, 0);
+                }
             }
             case ROTATE_Y, LOOKAT_Y -> {
                 // 世界 Y 轴在视图空间中的投影（考虑 pitch 和 roll）
